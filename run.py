@@ -1,8 +1,14 @@
+import argparse
 import glob
 import os
 
 import numpy as np
 import cv2
+
+
+parser = argparse.ArgumentParser(description='YOLO v2 Bounding Box Tool')
+parser.add_argument('format', default='yolo', type=str, help='Bounding box format. Default YOLO. Options: ["voc", "yolo"]')
+args = parser.parse_args()
 
 class_index = 0
 img_index = 0
@@ -14,6 +20,7 @@ mouse_x = 0
 mouse_y = 0
 point_1 = (-1, -1)
 point_2 = (-1, -1)
+
 
 def change_img_index(x):
     global img_index, img
@@ -65,12 +72,23 @@ def draw_line(img, x, y, height, width):
 
 def yolo_format(class_index, point_1, point_2, height, width):
     # YOLO wants everything normalized
+    # [category number] [object center in X] [object center in Y] [object width in X] [object width in Y]
     x_center = (point_1[0] + point_2[0]) / float(2.0 * height)
     y_center = (point_1[1] + point_2[1]) / float(2.0 * width)
     x_width = float(abs(point_2[0] - point_1[0])) / height
     y_height = float(abs(point_2[1] - point_1[1])) / width
     return str(class_index) + " " + str(x_center) \
        + " " + str(y_center) + " " + str(x_width) + " " + str(y_height)
+
+
+def voc_format(class_index, point_1, point_2):
+    # name.jpg xmin ymin xmax ymax label xmin ymin xmax ymax label ...
+    # We'll output the following on multiple lines: xmin ymin xmax ymax label
+    # to keep the code changes minimal. Then we'll write an external script
+    # to combine the files into the torchcv VOC format.
+    items = list(point_1) + list(point_2) + [class_index]
+    items = map(str, items)
+    return ' '.join(items)
 
 
 def get_txt_path(img_path):
@@ -95,6 +113,7 @@ def delete_bb(txt_path, line_index):
                 new_file.write(line)
             counter += 1
 
+
 def yolo_to_x_y(x_center, y_center, x_width, y_height, width, height):
     x_center *= width
     y_center *= height
@@ -104,6 +123,7 @@ def yolo_to_x_y(x_center, y_center, x_width, y_height, width, height):
     y_height /= 2.0
     return int(x_center - x_width), int(y_center - y_height), int(x_center + x_width), int(y_center + y_height)
 
+
 def draw_bboxes_from_file(tmp_img, txt_path, width, height):
     global img_objects
     img_objects = []
@@ -112,16 +132,22 @@ def draw_bboxes_from_file(tmp_img, txt_path, width, height):
             content = f.readlines()
         for line in content:
             values_str = line.split()
-            class_index, x_center, y_center, x_width, y_height = map(float, values_str)
+            if args.format == 'yolo':
+                # convert yolo to points
+                class_index, x_center, y_center, x_width, y_height = map(float, values_str)
+                x1, y1, x2, y2 = yolo_to_x_y(x_center, y_center, x_width, y_height, width, height)
+            elif args.format == 'voc':
+                x1, y1, x2, y2, class_index = map(int, values_str)
+            else:
+                raise Exception("Unknown bounding box format.")
             class_index = int(class_index)
-            # convert yolo to points
-            x1, y1, x2, y2 = yolo_to_x_y(x_center, y_center, x_width, y_height, width, height)
             img_objects.append([class_index, x1, y1, x2, y2])
             color = class_rgb[class_index].tolist()
             cv2.rectangle(tmp_img, (x1, y1), (x2, y2), color, 2)
             font = cv2.FONT_HERSHEY_SIMPLEX
             cv2.putText(tmp_img, class_list[class_index], (x1, y1 - 5), font, 0.6, color, 2, cv2.LINE_AA)
     return tmp_img
+
 
 # mouse callback function
 def draw_roi(event, x, y, flags, param):
@@ -183,7 +209,7 @@ with open('class_list.txt') as f:
 last_class_index = len(class_list) - 1
 
 # random rgb for each class
-class_rgb = np.random.random_integers(low=0, high=255, size=(len(class_list),3))
+class_rgb = np.random.randint(low=0, high=255+1, size=(len(class_list), 3))
 
 # create window
 WINDOW_NAME = 'Bounding Box Labeler'
@@ -246,7 +272,14 @@ while True:
             # if second click
             if point_2[0] is not -1:
                 # save the bounding box
-                line = yolo_format(class_index, point_1, point_2, width, height)
+                if args.format == 'yolo':
+                    line = yolo_format(class_index, point_1, point_2, width, height)
+                    print("YOLO?")
+                elif args.format == 'voc':
+                    line = voc_format(class_index, point_1, point_2)
+                    print(line)
+                else:
+                    raise Exception("Unknown bounding box format.")
                 save_bb(txt_path, line)
                 # reset the points
                 point_1 = (-1, -1)
@@ -300,4 +333,3 @@ while True:
         break
 
 cv2.destroyAllWindows()
-
