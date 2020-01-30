@@ -19,6 +19,7 @@ def change_img_index(x):
     global img_index, img
     img_index = x
     img_path = image_list[img_index]
+    print("current image is: " + img_path + " at index number: " + str(img_index))
     img = cv2.imread(img_path)
     cv2.displayOverlay(WINDOW_NAME, "Showing image "
                                     "" + str(img_index) + "/"
@@ -212,6 +213,7 @@ if not os.path.exists(bb_dir):
 # loop
 while True:
     # clone the img
+
     tmp_img = img.copy()
     height, width = tmp_img.shape[:2]
     if edges_on == True:
